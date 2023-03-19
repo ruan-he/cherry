@@ -1,0 +1,160 @@
+import sys
+import pandas as pd
+from PyQt5.QtWidgets import *
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+
+
+class CsvViewer(QWidget):
+    def __init__(self):
+        super().__init__()
+
+        # Set up the GUI window
+        self.setGeometry(200, 200, 900, 600)
+        self.setWindowTitle('CSV Viewer')
+
+        # Load the style sheet
+        with open('style.qss', 'r') as f:
+            stylesheet = f.read()
+            app.setStyleSheet(stylesheet)
+
+        # Add a background image to the window
+        self.background_image = QImage(r'C:\Users\lenovo\Desktop\课件整理\background.jpg')
+        self.palette = QPalette()
+        self.palette.setBrush(10, QBrush(self.background_image.scaled(self.size(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)))
+        self.setPalette(self.palette)
+
+        # Create the widgets
+        self.label = QLabel(self)
+        self.label.setGeometry(20, 20, 600, 480)
+        self.label.setAlignment(Qt.AlignLeft)
+        self.label.setWordWrap(False)
+
+        self.next_button = QPushButton('Next', self)
+        self.next_button.setObjectName('next_button')
+        self.next_button.setGeometry(650, 70, 160, 50)
+
+        self.mark_button = QPushButton('Mark', self)
+        self.mark_button.setObjectName('mark_button')
+        self.mark_button.setGeometry(650, 140, 160, 50)
+
+        self.last_button = QPushButton('Last', self)
+        self.last_button.setObjectName('last_button')
+        self.last_button.setGeometry(650, 210, 160, 50)
+
+        self.deletButton = QPushButton('add to delet list', self)
+        self.deletButton.setObjectName('deletButton')
+        self.deletButton.setGeometry(650, 280, 160, 50)
+
+        self.exit_button = QPushButton('Exit', self)
+        self.exit_button.setObjectName('exit_button')
+        self.exit_button.setGeometry(650, 400, 160, 50)
+
+        # Set up the button connections
+        self.next_button.clicked.connect(self.show_next)
+        self.mark_button.clicked.connect(self.mark_row)
+        self.last_button.clicked.connect(self.show_last)
+        self.deletButton.clicked.connect(self.delete)
+        self.exit_button.clicked.connect(self.close)
+
+        # Initialize class variables
+        self.rows = None
+        self.current_index = 0
+        self.marked_rows = set()
+
+        # Enable drag-and-drop
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        # Check if the event contains a csv file
+        if event.mimeData().hasUrls() and event.mimeData().urls()[0].toString().lower().endswith('.csv'):
+            event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        # Get the file path from the dropped event
+        file_path = event.mimeData().urls()[0].toLocalFile()
+
+        # Load the csv file using pandas
+        self.rows = pd.read_csv(file_path, encoding='utf-8')
+
+        # Show the first row
+        self.show_row(0)
+
+    def show_row(self, index):
+        # Get the row data as a pandas Series
+        row = self.rows.iloc[index]
+
+        # Construct the label's text
+        label_text = ''
+        value_text = ''
+        for col_label, col_value in row.iteritems():
+            # Add the column label with bold formatting
+            label_text += f'<b>{col_label}:</b> '
+
+            # Add the column's value to the value string, with a line break
+            value_text += f'<span class="value">{col_value}</span>'
+            # value_text += f'<span class="value">{col_value}</span><br>'
+        label_text += '\n'
+        
+        # Concatenate the label and value strings into a final text string
+        row_text = f'<span style="font-size: 20px;">{label_text}</span><br>{value_text}'
+
+        # Update the label's text and style
+        self.label.setText(row_text)
+        self.label.setProperty('class', '')
+
+        # Highlight the row if it is marked
+        if index in self.marked_rows:
+            self.label.setProperty('class', 'marked')
+
+        # Update the current index variable
+        self.current_index = index
+
+    def show_next(self):
+        # Show the next row, wrapping around to the beginning if necessary
+        self.show_row((self.current_index + 1) % len(self.rows))
+
+    def mark_row(self):
+        # Toggle the marked status of the current row
+        if self.current_index in self.marked_rows:
+            self.marked_rows.remove(self.current_index)
+        else:
+            self.marked_rows.add(self.current_index)
+
+        # Update the label background color
+        if self.current_index in self.marked_rows:
+            self.label.setProperty('class', 'marked')
+        else:
+            self.label.setProperty('class', '')
+    def show_last(self):
+        # Show the previous row, wrapping around to the end if necessary
+        self.show_row((self.current_index - 1) % len(self.rows))
+
+    def delete(self):
+        path = r'C:\Users\lenovo\Desktop\课件整理\alreadyWordList.xlsx'
+        excel_file = pd.read_excel(path)
+        my_data = excel_file['樱花']
+        my_list = my_data.tolist()
+        value_list = self.rows['单词'].tolist()
+        wordsList = []
+        for i in self.marked_rows:
+            words = value_list[i]
+            if not words in wordsList:
+                wordsList.append(words)
+        for i in wordsList:
+            if not words in my_list:
+                my_list.append(words)
+        new_data = pd.DataFrame({'樱花': my_list})
+        new_data.to_excel(path, index=False)
+        print('already added')
+
+
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon(r'C:\Users\lenovo\Desktop\课件整理\icon.ico'))
+    window = CsvViewer()
+    window.show()
+    sys.exit(app.exec_())
