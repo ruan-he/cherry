@@ -1,0 +1,249 @@
+import pandas as pd
+import pdfplumber
+import sys
+import re
+import random
+import hashlib
+import urllib.parse
+import requests
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtWidgets import QHeaderView,QTableView,QApplication, QLabel, QMainWindow
+from PyQt5.QtGui import QStandardItemModel, QStandardItem
+# import cProfile
+
+
+#窗口程序
+class MainWindow(QMainWindow):
+    fileDropped = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.filePath = ''
+        self.label = QLabel('', self)
+        self.label.setAlignment(Qt.AlignCenter)
+        self.setCentralWidget(self.label)
+
+        self.setWindowTitle("Drag and Drop Example")
+        self.resize(1000, 700)
+
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls():
+            filePath = event.mimeData().urls()[0].toLocalFile()
+            self.label.setText(filePath)
+            self.fileDropped.emit(filePath)
+            event.accept()
+            self.filePath = filePath
+        else:
+            event.ignore()
+
+#数据处理
+class data():
+    def __init__(self,openPath):
+        self.openPath = openPath#从窗口程序获取打开路径
+        self.excelPath = ''#获取输出excel地址
+        self.csvPath = ''#获取输出csv地址
+        self.alreadyList = []#用pandas读取已有单词列表
+        self.pdf = None#打开pdf
+        self.totalPages = None#获取总页数
+        self.page = None#获取当前要翻译的页数int
+        self.text = ''#获取每一页的文字
+        self.PureOutList = []#去除重复单词并传到PureOutList
+        self.pureList = []#净化，去除不用翻译的单词
+        self.dealList = []#收集每页要翻译的单词列表，嵌套列表
+        self.putOutList = []#获取输出单词总表
+        self.OKlist = []#获取要翻译单词总表
+        self.resultList = []#所有翻译结果
+        self.wordsDict = {}#获取翻译字典
+        self.translatedList = []#收集每页翻译过的单词
+
+
+    def run(self):
+        self.makeExcelPath()
+        self.makeCsvPath()
+        self.excelOneLineToList()
+        self.openPdf()
+        self.getPage()
+        self.readPdf()
+        self.makeDealList()
+        self.translate()
+        self.makeDict()
+        self.collectTranslatedList()
+        self.write()
+        self.tocsv()
+
+    #获取输出excel地址
+    def makeExcelPath(self):
+        self.excelPath = self.openPath.replace('.pdf','',1)+'.xlsx'
+        print(self.excelPath)
+    
+    #获取输出csv地址
+    def makeCsvPath(self):
+        self.csvPath = self.excelPath.replace('.xlsx','',1)+'.csv'
+        print(self.csvPath)
+
+    #用pandas读取已有单词列表
+    def excelOneLineToList(self):
+        df = pd.read_excel(r"C:\Users\lenovo\Desktop\课件整理\alreadyWordList.xlsx")
+        dfLi = df.values.tolist()
+        for sLi in dfLi:
+            self.alreadyList.append(sLi[0])
+        # print(self.alreadyList)
+        # print(len(self.alreadyList))
+
+    #打开pdf
+    def openPdf(self):
+        self.pdf = pdfplumber.open(self.openPath)#打开pdf文件
+
+    #获取总页数
+    def getPage(self):
+        self.totalPages = len(self.pdf.pages)#获取总页数
+
+    #收集要翻译的单词
+    def readPdf(self):
+        for page in range(1,self.totalPages+1):
+            self.page = page#传出当前要翻译的页数int
+            self.getText()#获取每一页的文字
+            self.deleatRepeat()#正则表达式+去重
+            self.pure()#去除不翻译单词
+            self.collectDealList()#收集每页要翻译的单词
+            print('已收集第'+str(page)+'页')
+
+    #获取页面的文字
+    def getText(self):
+        self.text = self.pdf.pages[self.page-1].extract_text()
+
+    #正则表达式
+    def deleatRepeat(self):
+        self.PureOutList = [] #清空
+        pat = '[a-zA-Z]+'#正则表达式
+        outList = re.findall(pat,self.text)#用正则表达式提取字符串中的单词,有重复
+        #去除重复单词并传到PureOutList
+        for i in outList:
+            if not i in self.PureOutList :
+                self.PureOutList.append(i)
+
+    #净化，去除不用翻译的单词
+    def pure(self):
+        self.pureList = []
+        self.pureList.append('第'+str(self.page)+'页')
+        for i in self.PureOutList:
+            if not i in self.alreadyList:
+                if self.page-2 < 0:#临近两页单词不重复
+                    self.pureList.append(i)
+                else:
+                    if not i in self.dealList[self.page-2]:
+                        self.pureList.append(i)
+
+    #收集每页要翻译的单词
+    def collectDealList(self):
+        self.dealList.append(self.pureList)
+
+    #获取要翻译单词总表,顺带生成个总输出列表
+    def makeDealList(self):
+        for l in self.dealList:
+            for i in l:
+                self.putOutList.append(i)
+                if not i in self.OKlist:
+                    self.OKlist.append(i)#获取要翻译单词总表
+        print('要翻译单词总表:')
+        print(len(self.OKlist))  
+
+    #翻译
+    def translate(self):
+        appid = ''  # 你的appid
+        secretKey = ''  # 你的密钥
+
+        fromLang = 'en'
+        toLang = 'zh'
+        salt =  random.randint(1111111111, 9999999999)  # 生成随机值，可以设置为固定的数值
+        a=0
+        for i in self.OKlist:
+            a=a+1
+            words = i
+            sign = appid + words + str(salt) + secretKey    # 拼接签名
+            sign = hashlib.md5(sign.encode()).hexdigest()
+            # 拼接url
+            url = f'http://api.fanyi.baidu.com/api/trans/vip/translate?q={urllib.parse.quote(words)}&from={fromLang}&to={toLang}&appid={appid}&salt={salt}&sign={sign}'
+            res = requests.get(url).json()#获取返回内容
+            result = res['trans_result'][0]['dst']   # 筛选到翻译结果
+            self.resultList.append(result)
+            print(a)
+        print('翻译完成')
+
+    #制作单词表
+    def makeDict(self):
+        self.wordsDict = dict(zip(self.OKlist, self.resultList))
+        print('ok for dict')
+
+    #收集总输出翻译过的单词
+    def collectTranslatedList(self):
+        for i in self.putOutList:
+            self.translatedList.append(self.wordsDict[i])
+
+    #二维列表写入
+    def write(self):
+        print('self.putOutList:')
+        print(len(self.putOutList))
+        print('self.translatedList:')
+        print(len(self.translatedList))
+        d = {'单词':self.putOutList,'翻译':self.translatedList}
+        df = pd.DataFrame(data=d)
+        with pd.ExcelWriter(self.excelPath) as writer:
+            df.to_excel(writer, index=False)
+
+    #输出csv
+    def tocsv(self):
+        excelFile = pd.read_excel(self.excelPath)
+        csvFile = excelFile.to_csv(self.csvPath, encoding='utf-8-sig')
+        return csvFile
+
+
+# create the main window and table view
+class mainWindow(QMainWindow):
+    def __init__(self,csvPath):
+        super().__init__()
+        self.csvPath = csvPath
+        self.df = pd.read_csv(self.csvPath)
+        # set main window properties
+        self.setWindowTitle('CSV Viewer')
+        self.setGeometry(100, 100, 800, 600)
+        
+        # create table view and set properties
+        table = QTableView()
+        table.setModel(QStandardItemModel())
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        
+        # populate table view with data from dataframe
+        for r in range(self.df.shape[0]):
+            for c in range(self.df.shape[1]):
+                item = QStandardItem(str(self.df.iloc[r, c]))
+                item.setTextAlignment(Qt.AlignCenter)
+                table.model().setItem(r, c, item)
+        
+        # set main window central widget
+        self.setCentralWidget(table)
+
+
+if __name__ == '__main__':
+    app = QApplication([])
+    window = MainWindow()
+    window.show()
+    app.exec_()
+    Data = data(window.filePath)
+    Data.run()
+    # cProfile.run("Data.run()",'profile_results.txt')
+    # stats = cProfile.Profile()
+    # stats.print_stats()
+    # print("Total time:", stats.total_tt)
+    app1 = QApplication(sys.argv)
+    window1 = mainWindow(Data.csvPath)
+    window1.show()
+    sys.exit(app1.exec_())
